@@ -216,3 +216,155 @@ select {
 .error {
   color: #b42318;
 }
+.extracted-fields {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  text-align: left;
+}
+
+.extracted-fields small {
+  display: block;
+  color: #1f2937;
+}
+
+.raw-ocr {
+  margin-top: 10px;
+  text-align: left;
+}
+
+.raw-ocr summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #2563eb;
+}
+
+.raw-ocr small {
+  display: block;
+  margin-top: 6px;
+  color: #4b5563;
+  white-space: pre-wrap;
+}
+.compliance-pass,
+.compliance-review {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.compliance-pass {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.compliance-review {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.compliance-pass small,
+.compliance-review small {
+  display: block;
+}
+.compliance-report {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  text-align: left;
+}
+
+.compliance-report h3 {
+  margin: 0 0 8px;
+  color: #1e3a8a;
+}
+
+.problems-box {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.problems-box p {
+  margin: 6px 0 0;
+}
+
+.rules-table-wrap {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+.rules-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  background: white;
+}
+
+.rules-table th,
+.rules-table td {
+  border: 1px solid #dbeafe;
+  padding: 8px;
+  vertical-align: top;
+}
+
+.rules-table th {
+  background: #dbeafe;
+  color: #1e3a8a;
+}
+
+.human-review {
+  margin-top: 10px;
+  color: #92400e;
+  font-weight: 600;
+}
+.verification-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.verification-actions button {
+  border: 1px solid #2563eb;
+  background: white;
+  color: #2563eb;
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.verification-actions button:hover {
+  background: #dbeafe;
+}
+
+.human-decision {
+  margin-top: 10px;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-weight: 700;
+}
+.download-report-button {
+  margin-top: 10px;
+  width: 100%;
+  border: none;
+  background: #0f172a;
+  color: white;
+  border-radius: 6px;
+  padding: 10px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.download-report-button:hover {
+  background: #1e293b;
+}
