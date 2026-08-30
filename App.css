@@ -1,0 +1,218 @@
+:root {
+  font-family: Inter, system-ui, sans-serif;
+  color: #12233f;
+  background: #eef4fa;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.page {
+  min-height: 100vh;
+  padding: 24px;
+  display: flex;
+  justify-content: center;
+}
+
+.card {
+  width: min(900px, 100%);
+  height: fit-content;
+  background: white;
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 12px 30px rgba(18, 35, 63, 0.12);
+}
+
+h1 {
+  margin: 0;
+}
+
+h2 {
+  margin-top: 28px;
+  font-size: 1.1rem;
+}
+
+.subtitle,
+.hint {
+  color: #5b6878;
+  line-height: 1.5;
+}
+
+.field-label {
+  display: block;
+  margin-top: 20px;
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+select {
+  width: 100%;
+  max-width: 300px;
+  padding: 12px;
+  border: 1px solid #b9c7d8;
+  border-radius: 8px;
+  font-size: 1rem;
+}
+
+.hidden-input {
+  display: none;
+}
+
+.primary-button,
+.remove-button {
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.primary-button {
+  display: block;
+  margin-top: 16px;
+  padding: 13px 18px;
+  background: #0759c7;
+  color: white;
+  font-size: 1rem;
+}
+
+.primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px;
+  margin: 14px 0 20px;
+}
+
+.image-card {
+  overflow: hidden;
+  border: 1px solid #d8e1eb;
+  border-radius: 12px;
+}
+
+.image-card img {
+  width: 100%;
+  height: 170px;
+  object-fit: cover;
+  display: block;
+}
+
+.image-meta {
+  padding: 10px;
+}
+
+.image-meta span,
+.image-meta small {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.image-meta span {
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.remove-button {
+  width: calc(100% - 20px);
+  margin: 0 10px 10px;
+  padding: 9px;
+  background: #fee2e2;
+  color: #9b1c1c;
+}
+
+.message {
+  margin-top: 20px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #e7f3ff;
+  color: #073c76;
+}
+
+/* Camera Capture Modal Styles */
+.button-row,
+.camera-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.secondary-button {
+  padding: 13px 18px;
+  border: 1px solid #0759c7;
+  border-radius: 8px;
+  background: white;
+  color: #0759c7;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.camera-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.camera-content {
+  width: min(680px, 100%);
+  background: white;
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.camera-preview {
+  width: 100%;
+  max-height: 65vh;
+  background: #111;
+  border-radius: 12px;
+  object-fit: cover;
+   display: block;
+}
+
+
+
+.camera-frame {
+  position: relative;
+}
+
+.label-guide {
+  position: absolute;
+  inset: 12% 8%;
+  border: 3px solid rgba(90, 255, 120, 0.95);
+  border-radius: 12px;
+  pointer-events: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 12px;
+  color: white;
+  text-align: center;
+  font-weight: 700;
+  background: linear-gradient(
+    rgba(0, 0, 0, 0.05),
+    rgba(0, 0, 0, 0.35)
+  );
+}
+.label-guide span {
+  background: rgba(0, 0, 0, 0.6);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+
+.error {
+  color: #b42318;
+}
