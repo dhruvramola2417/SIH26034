@@ -320,7 +320,86 @@ function downloadComplianceReport(item) {
 
   reportWindow.document.close();
 }
+function updateHumanVerification(id, decision) {
+  setImages((current) =>
+    current.map((item) =>
+      item.id === id
+        ? {
+            ...item,
+            humanDecision: decision
+          }
+        : item
+    )
+  );
+}
+async function uploadCombinedScan() {
+  if (images.length < 2) {
+    setMessage("Upload at least two images: one front and one back.");
+    return;
+  }
 
+  const hasFront = images.some((item) => item.side === "front");
+  const hasBack = images.some((item) => item.side === "back");
+
+  if (!hasFront || !hasBack) {
+    setMessage("Please upload both a front image and a back image.");
+    return;
+  }
+
+  setUploading(true);
+  setMessage("");
+
+  try {
+    const formData = new FormData();
+
+    images.forEach((item) => {
+      formData.append("images", item.file);
+      formData.append("sides", item.side);
+    });
+
+    formData.append("capture_method", "combined_front_back");
+    formData.append("client_timestamp", new Date().toISOString());
+
+    const response = await fetch(`${API_URL}/api/v1/combined-scan`, {
+      method: "POST",
+      body: formData
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.detail || "Combined scan failed.");
+    }
+
+    setImages((current) =>
+      current.map((item) => ({
+        ...item,
+        status: "included_in_combined_report"
+      }))
+    );
+
+    setMessage("Combined front + back compliance report generated.");
+
+    setImages((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        file: {
+          name: "Combined Front + Back Report"
+        },
+        side: "combined",
+        previewUrl: images[0].previewUrl,
+        status: "uploaded",
+        serverData: data,
+        humanDecision: null
+      }
+    ]);
+  } catch (error) {
+    setMessage(`Combined scan error: ${error.message}`);
+  } finally {
+    setUploading(false);
+  }
+}
   async function uploadAllImages() {
     if (images.length === 0) {
       setMessage("Capture or upload at least one label image first.");
@@ -449,6 +528,12 @@ function downloadComplianceReport(item) {
                         <small><strong>Use By / Best Before:</strong> {item.serverData.fields.use_by_or_best_before || "Not found"}</small>
                         <small><strong>Manufacturer FSSAI:</strong> {item.serverData.fields.manufacturer_fssai || "Not found"}</small>
                         <small><strong>Marketed By FSSAI:</strong> {item.serverData.fields.marketed_by_fssai || "Not found"}</small>
+                        <small>
+  <strong>All FSSAI Numbers:</strong>{" "}
+  {item.serverData.fields.all_fssai_numbers?.length
+    ? item.serverData.fields.all_fssai_numbers.join(", ")
+    : "Not found"}
+</small>
                         <small><strong>Email:</strong> {item.serverData.fields.email || "Not found"}</small>
                         <small><strong>Customer Care:</strong> {item.serverData.fields.customer_care || "Not found"}</small>
                         <small><strong>Storage:</strong> {item.serverData.fields.storage_instruction || "Not found"}</small>
@@ -529,10 +614,13 @@ function downloadComplianceReport(item) {
                             Verified Fail
                           </button>
 
-                          <button onClick={() => updateHumanVerification(item.id, "needs_recheck")}>
-                            Needs Recheck
-                          </button>
-                        </div>
+                          <button
+    type="button"
+    onClick={() => updateHumanVerification(item.id, "needs_recheck")}
+  >
+    Needs Recheck
+  </button>
+</div>
                         {item.humanDecision && (
   <p className="human-decision">
     Final Human Decision: {item.humanDecision.replace("_", " ").toUpperCase()}
@@ -581,7 +669,13 @@ function downloadComplianceReport(item) {
               disabled={uploading}
             >
               {uploading ? "Uploading..." : "Upload and Start Scan"}
-            </button>
+            </button><button
+  className="secondary-button"
+  onClick={uploadCombinedScan}
+  disabled={uploading}
+>
+  Generate Combined Front + Back Report
+</button> 
           </>
         )}
 
