@@ -34,7 +34,6 @@ def clean_company_name(value):
 
     return value
 
-
 def fix_fssai_number(value):
     if not value:
         return None
@@ -45,6 +44,29 @@ def fix_fssai_number(value):
     }
 
     return corrections.get(value, value)
+
+
+def normalize_ocr_text(text):
+    # OCR often reads ₹ as 2
+    text = re.sub(
+        r'(?i)(MRP\s*[:\-]?\s*)2(?=\s*\d)',
+        r'\1₹ ',
+        text
+    )
+
+    text = re.sub(
+        r'(?i)(Retail\s*Sale\s*Price\s*[:\-]?\s*)2(?=\s*\d)',
+        r'\1₹ ',
+        text
+    )
+
+    # OCR sometimes reads Rs as R5
+    text = re.sub(r'(?i)R5', 'Rs', text)
+
+    # Remove extra spaces
+    text = re.sub(r'\s+', ' ', text)
+
+    return text
 
 
 def find_fssai_numbers(text):
@@ -89,34 +111,80 @@ async def extract_text_from_image(image):
     image_bytes = await image.read()
     pil_image = Image.open(BytesIO(image_bytes))
 
-    pil_image = pil_image.convert("L")
-    pil_image = ImageOps.autocontrast(pil_image)
-    pil_image = pil_image.filter(ImageFilter.SHARPEN)
-    pil_image = pil_image.resize((pil_image.width * 2, pil_image.height * 2))
+    gray = pil_image.convert("L")
+    gray = ImageOps.autocontrast(gray)
+    gray = gray.filter(ImageFilter.SHARPEN)
 
-    full_text_psm6 = pytesseract.image_to_string(
-        pil_image,
-        config="--psm 6"
+    gray = gray.resize(
+        (gray.width * 3, gray.height * 3),
+        Image.Resampling.LANCZOS
     )
 
-    full_text_psm11 = pytesseract.image_to_string(
-        pil_image,
-        config="--psm 11"
+    config = "--oem 3 --psm 6"
+
+    texts = []
+
+    # Normal OCR
+    texts.append(
+        pytesseract.image_to_string(gray, config=config)
     )
 
-    width, height = pil_image.size
-    bottom_crop = pil_image.crop((0, int(height * 0.70), width, height))
-
-    bottom_text = pytesseract.image_to_string(
-        bottom_crop,
-        config="--psm 6"
+    # OCR on image rotated 90°
+    texts.append(
+        pytesseract.image_to_string(
+            gray.rotate(90, expand=True),
+            config=config
+        )
     )
 
-    return "\n".join([
-        full_text_psm6,
-        full_text_psm11,
-        bottom_text
-    ])
+    # OCR on image rotated 270°
+    texts.append(
+        pytesseract.image_to_string(
+            gray.rotate(270, expand=True),
+            config=config
+        )
+    )
+
+    # Bottom portion
+    width, height = gray.size
+
+    bottom = gray.crop(
+        (0, int(height * 0.65), width, height)
+    )
+
+    texts.append(
+        pytesseract.image_to_string(
+            bottom,
+            config=config
+        )
+    )
+
+    # RIGHT STRIP (contains vertical MFG / EXP dates)
+    right = gray.crop(
+        (int(width * 0.82), 0, width, height)
+    )
+
+    texts.append(
+        pytesseract.image_to_string(
+            right.rotate(90, expand=True),
+            config=config
+        )
+    )
+
+    texts.append(
+        pytesseract.image_to_string(
+            right.rotate(270, expand=True),
+            config=config
+        )
+    )
+
+    extracted_text = "\n".join(texts)
+
+    extracted_text = normalize_ocr_text(extracted_text)
+
+    return extracted_text
+    
+
 
 
 def build_compliance_report(extracted_text):
@@ -164,15 +232,15 @@ def build_compliance_report(extracted_text):
     )
 
     mfg_date_match = re.search(
-        r'(?:MFD|MFG|Mfg\.?\s*Date|Manufacturing\s*Date|Packed\s*on)[:.\-\s]*([A-Za-z0-9 ./-]+)',
+        r'(?:MFD|MFG|MFG\.?\s*BY|Manufacturing\s*Date|Packed\s*on).*?([0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{2,4}|[A-Za-z]{3}\s*[0-9]{2,4}|[0-9]{2}/[0-9]{4}|[0-9]{2}/[0-9]{2})',
         extracted_text,
-        re.IGNORECASE
+        re.IGNORECASE | re.DOTALL
     )
 
     use_by_match = re.search(
-        r'(?:Use\s*By|Best\s*Before|Expiry|Exp\.?\s*Date)[:.\-\s]*([A-Za-z0-9 ./-]+)',
+        r'(?:USE\s*BY|BEST\s*BEFORE|EXP|EXPIRY|Expiry\s*Date).*?([0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{2,4}|[A-Za-z]{3}\s*[0-9]{2,4}|[0-9]{2}/[0-9]{4}|[0-9]{2}/[0-9]{2})',
         extracted_text,
-        re.IGNORECASE
+        re.IGNORECASE | re.DOTALL
     )
 
     email_match = re.search(
@@ -192,8 +260,15 @@ def build_compliance_report(extracted_text):
     )
 
     product_name = product_name_match.group(1).strip() if product_name_match else None
-    manufacturer = clean_company_name(manufacturer_match.group(1) if manufacturer_match else None)
-    marketed_by = clean_company_name(marketed_by_match.group(1) if marketed_by_match else None)
+
+    manufacturer = clean_company_name(
+        manufacturer_match.group(1) if manufacturer_match else None
+    )
+
+    marketed_by = clean_company_name(
+        marketed_by_match.group(1) if marketed_by_match else None
+    )
+
     address = address_match.group(1).strip() if address_match else None
     net_quantity = net_quantity_match.group(1).strip() if net_quantity_match else None
 
@@ -210,8 +285,10 @@ def build_compliance_report(extracted_text):
     fssai_numbers = find_fssai_numbers(extracted_text)
 
     primary_fssai = fssai_numbers[0] if fssai_numbers else None
-    marketed_by_fssai = fssai_numbers[0] if len(fssai_numbers) >= 1 else None
+    marketed_by_fssai = fix_fssai_number(primary_fssai) if primary_fssai else None
     manufacturer_fssai = fssai_numbers[1] if len(fssai_numbers) >= 2 else primary_fssai
+    if manufacturer_fssai:
+        manufacturer_fssai = fix_fssai_number(manufacturer_fssai)
 
     required_fields = {
         "product_name": product_name,
@@ -240,6 +317,24 @@ def build_compliance_report(extracted_text):
                 field,
                 f"{field.replace('_', ' ').title()} was not detected on the label.",
                 "LMPC Rule 6 mandatory declaration"
+            )
+        )
+
+    if manufacturer_fssai and len(manufacturer_fssai) != 14:
+        problems.append(
+            make_problem(
+                "manufacturer_fssai",
+                "Manufacturer FSSAI license number should be 14 digits.",
+                "Food license declaration validation"
+            )
+        )
+
+    if marketed_by_fssai and len(marketed_by_fssai) != 14:
+        problems.append(
+            make_problem(
+                "marketed_by_fssai",
+                "Marketed By FSSAI license number should be 14 digits.",
+                "Food license declaration validation"
             )
         )
 
@@ -413,4 +508,4 @@ async def combined_scan(
         "combined_extracted_text": combined_text,
         "fields": fields,
         "compliance_report": compliance_report
-    }
+}
