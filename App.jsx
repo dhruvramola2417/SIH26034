@@ -117,7 +117,7 @@ function downloadComplianceReport(item) {
     <!DOCTYPE html>
     <html>
       <head>
-        <title>LMPC Compliance Report</title>
+        <title>Saayujya Compliance Report</title>
 
         <style>
           body {
@@ -246,7 +246,7 @@ function downloadComplianceReport(item) {
       </head>
 
       <body>
-        <h1>LMPC Compliance Report</h1>
+        <h1>Saayujya Compliance Report</h1>
         <p class="subtitle">
           Automated Compliance Checker for Legal Metrology Packaged Commodity Declarations
         </p>
@@ -456,11 +456,33 @@ async function uploadCombinedScan() {
   return (
     <main className="page">
       <section className="card">
-        <h1>LMPC Label Scanner</h1>
+        <header className="app-header">
+          <div className="brand">
+            <div className="brand-mark" aria-hidden="true">S</div>
+            <div>
+              <h1>Saayujya</h1>
+              <p className="brand-kicker">Intelligent label compliance</p>
+            </div>
+          </div>
+          <span className="status-pill"><i /> Scanner ready</span>
+        </header>
 
-        <p className="subtitle">
-          Capture clear photos of the package declarations for automated compliance screening.
-        </p>
+        <section className="hero">
+          <span className="eyebrow">LMPC CAMERA SCANNER</span>
+          <h2>Compliance, captured clearly.</h2>
+          <p className="subtitle">
+            Scan packaged commodity labels and turn them into a clear, structured compliance review in seconds.
+          </p>
+        </section>
+
+        <section className="scan-panel">
+          <div className="section-heading">
+            <div>
+              <span className="step-label">01 · CAPTURE</span>
+              <h3>Add a package label</h3>
+            </div>
+            <span className="secure-note">Private by design</span>
+          </div>
 
         <label className="field-label" htmlFor="side">
           Package side
@@ -491,21 +513,22 @@ async function uploadCombinedScan() {
 
         <div className="button-row">
           <button className="primary-button" onClick={() => setCameraOpen(true)}>
-            Open Live Camera
+            Open camera
           </button>
 
           <button className="secondary-button" onClick={openCameraOrGallery}>
-            Upload from Gallery
+            Choose photos
           </button>
         </div>
 
         <p className="hint">
-          On phones, this requests the rear camera where supported. On desktops, it opens the file picker.
+          For best results, keep the label flat, evenly lit, and fully visible. Use the rear camera on mobile devices.
         </p>
+        </section>
 
         {images.length > 0 && (
           <>
-            <h2>Captured images</h2>
+            <div className="section-heading results-heading"><div><span className="step-label">02 · REVIEW</span><h3>Captured labels</h3></div><span className="count-pill">{images.length} item{images.length === 1 ? "" : "s"}</span></div>
 
             <div className="image-grid">
               {images.map((item) => (
@@ -668,13 +691,13 @@ async function uploadCombinedScan() {
               onClick={uploadAllImages}
               disabled={uploading}
             >
-              {uploading ? "Uploading..." : "Upload and Start Scan"}
+              {uploading ? "Uploading..." : "Analyze labels"}
             </button><button
   className="secondary-button"
   onClick={uploadCombinedScan}
   disabled={uploading}
 >
-  Generate Combined Front + Back Report
+  Create combined report
 </button> 
           </>
         )}
