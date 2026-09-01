@@ -6,11 +6,18 @@ from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, ImageFilter, ImageOps
 
-app = FastAPI()
+app = FastAPI(
+    title="Saayujya API",
+    description="OCR-powered packaged commodity label scanning and LMPC compliance screening.",
+    version="1.0.0",
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -19,7 +26,12 @@ app.add_middleware(
 
 @app.get("/")
 def home():
-    return {"message": "LMPC Backend is running!"}
+    return {
+        "name": "Saayujya",
+        "message": "Saayujya backend is running!",
+        "status": "ok",
+        "version": "1.0.0",
+    }
 
 
 def clean_company_name(value):
@@ -254,7 +266,16 @@ def build_compliance_report(extracted_text):
     )
 
     storage_match = re.search(
-        r'(KEEP\s+.*|STORE\s+.*|UNDER\s+REFRIGERATED\s+CONDITION|REFRIGERATED\s+CONDITION|STORE\s+IN\s+A\s+COOL,\s+DRY\s+AND\s+HYGIENIC\s+PLACE)',
+        r'\b('
+        r'STORE\s+IN\s+A\s+COOL\s*,?\s*DRY\s+AND\s+HYGIENIC\s+PLACE'
+        r'|STORE\s+IN\s+A\s+COOL\s*(?:AND|&)\s*DRY\s+PLACE'
+        r'|STORE\s+IN\s+A\s+COOL\s+DRY\s+PLACE'
+        r'|KEEP\s+IN\s+A\s+COOL\s*(?:AND|&)\s*DRY\s+PLACE'
+        r'|KEEP\s+REFRIGERATED'
+        r'|STORE\s+UNDER\s+REFRIGERATED\s+CONDITION'
+        r'|UNDER\s+REFRIGERATED\s+CONDITION'
+        r'|REFRIGERATED\s+CONDITION'
+        r')\b',
         extracted_text,
         re.IGNORECASE
     )
@@ -459,7 +480,7 @@ async def create_scan(
 ):
     extracted_text = await extract_text_from_image(image)
     fields, compliance_report = build_compliance_report(extracted_text)
-
+    
     return {
         "message": "Image received successfully",
         "side": side,
