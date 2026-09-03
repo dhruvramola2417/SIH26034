@@ -2,6 +2,7 @@ from io import BytesIO
 import re
 
 import pytesseract
+from google.cloud import vision
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, ImageFilter, ImageOps
@@ -38,24 +39,13 @@ def clean_company_name(value):
     if not value:
         return None
 
-    value = value.strip()
-    value = value.replace("WBILANT", "JUBILANT")
-    value = value.replace("JULLAET", "JUBILANT")
-    value = value.replace("UU FOODWORKS", "JUBILANT FOODWORKS")
-    value = value.replace("JUBLFOOD", "JUBILANT FOODWORKS")
-
-    return value
+    return value.strip()
 
 def fix_fssai_number(value):
     if not value:
         return None
 
-    corrections = {
-        "1122399900046": "11223999000461",
-        "10017051002257": "10017051002267",
-    }
-
-    return corrections.get(value, value)
+    return value
 
 
 def normalize_ocr_text(text):
@@ -76,7 +66,8 @@ def normalize_ocr_text(text):
     text = re.sub(r'(?i)R5', 'Rs', text)
 
     # Remove extra spaces
-    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n+', '\n', text)
 
     return text
 
@@ -121,139 +112,205 @@ def make_problem(field, message, rule):
 
 async def extract_text_from_image(image):
     image_bytes = await image.read()
-    pil_image = Image.open(BytesIO(image_bytes))
 
-    gray = pil_image.convert("L")
-    gray = ImageOps.autocontrast(gray)
-    gray = gray.filter(ImageFilter.SHARPEN)
+    try:
+        client = vision.ImageAnnotatorClient()
 
-    gray = gray.resize(
-        (gray.width * 3, gray.height * 3),
-        Image.Resampling.LANCZOS
-    )
+        vision_image = vision.Image(content=image_bytes)
 
-    config = "--oem 3 --psm 6"
-
-    texts = []
-
-    # Normal OCR
-    texts.append(
-        pytesseract.image_to_string(gray, config=config)
-    )
-
-    # OCR on image rotated 90°
-    texts.append(
-        pytesseract.image_to_string(
-            gray.rotate(90, expand=True),
-            config=config
+        response = client.document_text_detection(
+            image=vision_image
         )
-    )
 
-    # OCR on image rotated 270°
-    texts.append(
-        pytesseract.image_to_string(
-            gray.rotate(270, expand=True),
-            config=config
+        if response.error.message:
+            raise RuntimeError(response.error.message)
+
+        extracted_text = response.full_text_annotation.text
+
+        if not extracted_text.strip():
+            raise RuntimeError("Google Cloud Vision returned no text.")
+
+        return normalize_ocr_text(extracted_text)
+
+    except Exception as error:
+        print(f"Cloud Vision failed: {error}")
+        print("Falling back to Tesseract OCR.")
+
+        pil_image = Image.open(BytesIO(image_bytes))
+
+        gray = pil_image.convert("L")
+        gray = ImageOps.autocontrast(gray)
+        gray = gray.filter(ImageFilter.SHARPEN)
+
+        gray = gray.resize(
+            (gray.width * 3, gray.height * 3),
+            Image.Resampling.LANCZOS
         )
-    )
 
-    # Bottom portion
-    width, height = gray.size
+        return normalize_ocr_text(
+            pytesseract.image_to_string(
+                gray,
+                config="--oem 3 --psm 6"
+            )
+        )  
 
-    bottom = gray.crop(
-        (0, int(height * 0.65), width, height)
-    )
+def find_labeled_value(text, labels, value_pattern, lookahead=5):
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
 
-    texts.append(
-        pytesseract.image_to_string(
-            bottom,
-            config=config
-        )
-    )
+    for i, line in enumerate(lines):
+        for label in labels:
+            label_match = re.search(label, line, re.IGNORECASE)
 
-    # RIGHT STRIP (contains vertical MFG / EXP dates)
-    right = gray.crop(
-        (int(width * 0.82), 0, width, height)
-    )
+            if not label_match:
+                continue
 
-    texts.append(
-        pytesseract.image_to_string(
-            right.rotate(90, expand=True),
-            config=config
-        )
-    )
+            # First check text after the label on the same line
+            after_label = line[label_match.end():]
 
-    texts.append(
-        pytesseract.image_to_string(
-            right.rotate(270, expand=True),
-            config=config
-        )
-    )
+            value_match = re.search(
+                value_pattern,
+                after_label,
+                re.IGNORECASE
+            )
 
-    extracted_text = "\n".join(texts)
+            if value_match:
+                return value_match.group(1)
 
-    extracted_text = normalize_ocr_text(extracted_text)
+            # Then check a few following OCR lines
+            for next_line in lines[i + 1:i + 1 + lookahead]:
+                value_match = re.search(
+                    value_pattern,
+                    next_line,
+                    re.IGNORECASE
+                )
 
-    return extracted_text
-    
+                if value_match:
+                    return value_match.group(1)
 
-
+    return None
 
 def build_compliance_report(extracted_text):
     product_name_match = re.search(
-        r'(CHILLI\s+FLAKES|CHILI\s+FLAKES|MAGGI|MAGGI\s+MASALA|MASALA\s+AE\s+MAGIC)',
-        extracted_text,
-        re.IGNORECASE
-    )
+    r'(?:Product\s*Name|Name\s*of\s*(?:Commodity|Product)|Commodity\s*Name)\s*[:\-]?\s*([^\n]+)',
+    extracted_text,
+    re.IGNORECASE
+)
 
     manufacturer_match = re.search(
-        r'(?:Manufactured\s*By|Mfg\.?\s*by|Mfd\.?\s*by|Manufacturer)[:\s]*([A-Za-z0-9 .,&()/-]+(?:Ltd\.?|Limited|Pvt\.?\s*Ltd\.?|LLP|Company|Foods|Foodworks))',
-        extracted_text,
-        re.IGNORECASE
+    r'(?:Manufactured\s*By|Mfg\.?\s*by|Mfd\.?\s*by|Manufacturer)\s*[:\-]?\s*([^\n,]+?(?:Ltd\.?|Limited|Pvt\.?\s*Ltd\.?|LLP|Foods?|Foodworks))',
+    extracted_text,
+    re.IGNORECASE
     )
 
     marketed_by_match = re.search(
-        r'(?:Marketed\s*By|Mkt\s*by|Mktd\s*by)[:\s]*([A-Za-z0-9 .,&()/-]+(?:Ltd\.?|Limited|Pvt\.?\s*Ltd\.?|LLP|Company|Foods|Foodworks))',
-        extracted_text,
-        re.IGNORECASE
+    r'(?:Marketed\s*By|Mkt\.?\s*by|Mktd\.?\s*by)\s*[:\-]?\s*([^\n,]+?(?:Ltd\.?|Limited|Pvt\.?\s*Ltd\.?|LLP|Foods?|Foodworks))',
+    extracted_text,
+    re.IGNORECASE
     )
 
     address_match = re.search(
-        r'([A-Za-z0-9\s,./()-]+(?:New Delhi|Delhi|Karnataka|Uttar Pradesh|Bangalore|Noida|Greater Noida|Mumbai|Maharashtra|Haryana|Punjab|Gujarat|Tamil Nadu|West Bengal)[A-Za-z0-9\s,./()-]*[0-9]{6})',
-        extracted_text,
-        re.IGNORECASE
-    )
+    r'(?:Manufactured\s*By|Mfg\.?\s*by|Mfd\.?\s*by|Manufacturer|'
+    r'Marketed\s*By|Mkt\.?\s*by|Mktd\.?\s*by)'
+    r'\s*[:\-]?\s*'
+    r'[^\n]*'
+    r'(?:\n[^\n]*){0,4}?'
+    r'\b\d{3}\s?\d{3}\b',
+    extracted_text,
+    re.IGNORECASE
+)
 
     net_quantity_match = re.search(
-        r'(?:NET\s*QUANTITY|NET\s*QTY|NET\s*WEIGHT|NET\s*WT|Net\s*Quantity|Net\s*Weight|Net\s*Wt)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?\s*(?:g|gm|gram|grams|kg|ml|mL|l|L|litre|litres))',
-        extracted_text,
-        re.IGNORECASE
-    )
+    r'(?:NET\s*QUANTITY|NET\s*QTY|NET\s*WEIGHT|NET\s*WT)'
+    r'\s*[:\-]?\s*'
+    r'([0-9]+(?:\.[0-9]+)?\s*(?:g|gm|gram|grams|kg|ml|mL|l|L|litre|litres))',
+    extracted_text,
+    re.IGNORECASE
+)
 
     if not net_quantity_match:
-        net_quantity_match = re.search(
-            r'\b([0-9]+(?:\.[0-9]+)?\s*(?:g|gm|gram|grams|kg|ml|mL|l|L|litre|litres))\b',
-            extracted_text,
+        net_quantity_value = find_labeled_value(
+        extracted_text,
+        [
+            r'\bNET\s*QUANTITY\b',
+            r'\bNET\s*QTY\b',
+            r'\bNET\s*WEIGHT\b',
+            r'\bNET\s*WT\b'
+        ],
+        r'([0-9]+(?:\.[0-9]+)?\s*(?:g|gm|gram|grams|kg|ml|mL|l|L|litre|litres))',
+        lookahead=80
+    )
+
+        if net_quantity_value:
+            net_quantity_match = re.search(
+            r'([0-9]+(?:\.[0-9]+)?\s*(?:g|gm|gram|grams|kg|ml|mL|l|L|litre|litres))',
+            net_quantity_value,
             re.IGNORECASE
         )
 
-    mrp_match = re.search(
-        r'(?:MRP|M\.R\.P|Retail\s*Sale\s*Price)\s*[₹Rs.]*\s*([0-9]+(?:\.[0-9]{1,2})?)',
-        extracted_text,
-        re.IGNORECASE
-    )
+    mrp = find_labeled_value(
+     extracted_text,
+    [
+        r'\bMRP\b',
+        r'\bM\.?\s*R\.?\s*P\.?\b',
+        r'\bMAXIMUM\s+RETAIL\s+PRICE\b',
+        r'\bRETAIL\s+SALE\s+PRICE\b'
+    ],
+    r'(?:₹|€|Rs\.?|INR)?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*(?:/-)?',
+    lookahead=10
+)
 
-    mfg_date_match = re.search(
-        r'(?:MFD|MFG|MFG\.?\s*BY|Manufacturing\s*Date|Packed\s*on).*?([0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{2,4}|[A-Za-z]{3}\s*[0-9]{2,4}|[0-9]{2}/[0-9]{4}|[0-9]{2}/[0-9]{2})',
-        extracted_text,
-        re.IGNORECASE | re.DOTALL
-    )
+    date_pattern = (
+    r'(\d{1,2}[./-]\d{1,2}[./-]\d{2,4}'
+    r'|[A-Za-z]{3}[./-]\d{2,4}'
+    r'|[A-Za-z]{3}\s+\d{2,4}'
+    r'|\d{2}[./-]\d{4})'
+)
 
-    use_by_match = re.search(
-        r'(?:USE\s*BY|BEST\s*BEFORE|EXP|EXPIRY|Expiry\s*Date).*?([0-9]{1,2}[./-][0-9]{1,2}[./-][0-9]{2,4}|[A-Za-z]{3}\s*[0-9]{2,4}|[0-9]{2}/[0-9]{4}|[0-9]{2}/[0-9]{2})',
-        extracted_text,
-        re.IGNORECASE | re.DOTALL
-    )
+    mfg_date = find_labeled_value(
+    extracted_text,
+    [
+        r'\bMFD\.?\b',
+        r'\bMFG\.?\s*DATE\b',
+        r'\bMANUFACTURING\s+DATE\b',
+        r'\bPKD\.?\b',
+        r'\bPACKED\s+ON\b'
+    ],
+    date_pattern,
+    lookahead=15
+)
+
+    use_by_date = find_labeled_value(
+    extracted_text,
+    [
+        r'\bUSE\s+BY\b',
+        r'\bBEST\s+BEFORE\b',
+        r'\bEXPIRY\b',
+        r'\bEXP\.?\s*DATE\b'
+    ],
+    date_pattern,
+    lookahead=15
+)
+
+    if use_by_date == mfg_date and mfg_date:
+        lines = [line.strip() for line in extracted_text.splitlines() if line.strip()]
+
+        all_dates = []
+
+        for line in lines:
+            match = re.fullmatch(date_pattern, line, re.IGNORECASE)
+            if match:
+                value = match.group(1)
+
+                if value not in all_dates:
+                 all_dates.append(value)
+
+        if mfg_date in all_dates:
+            mfg_index = all_dates.index(mfg_date)
+
+            if mfg_index + 1 < len(all_dates):
+              use_by_date = all_dates[mfg_index + 1]
+            else:
+                use_by_date = None
 
     email_match = re.search(
         r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}',
@@ -261,21 +318,21 @@ def build_compliance_report(extracted_text):
     )
 
     phone_match = re.search(
-        r'\b1800\s?\d{3}\s?\d{4}\b|\b(?:\+91[-\s]?)?\d{10}\b',
-        extracted_text
+        r'\b(?:'
+        r'1800(?:[-\s]?\d{2,4}){2,3}'
+        r'|(?:\+91[-\s]?)?[6-9]\d{9}'
+        r')\b',
+        extracted_text,
+        re.IGNORECASE
     )
 
     storage_match = re.search(
         r'\b('
-        r'STORE\s+IN\s+A\s+COOL\s*,?\s*DRY\s+AND\s+HYGIENIC\s+PLACE'
-        r'|STORE\s+IN\s+A\s+COOL\s*(?:AND|&)\s*DRY\s+PLACE'
-        r'|STORE\s+IN\s+A\s+COOL\s+DRY\s+PLACE'
-        r'|KEEP\s+IN\s+A\s+COOL\s*(?:AND|&)\s*DRY\s+PLACE'
-        r'|KEEP\s+REFRIGERATED'
-        r'|STORE\s+UNDER\s+REFRIGERATED\s+CONDITION'
-        r'|UNDER\s+REFRIGERATED\s+CONDITION'
-        r'|REFRIGERATED\s+CONDITION'
-        r')\b',
+        r'(?:STORE|KEEP)\s+[^\n]{0,80}?'
+        r'(?:COOL|DRY|HYGIENIC|REFRIGERAT(?:ED|ION)|FROZEN|'
+        r'MOISTURE|SUNLIGHT|TEMPERATURE)'
+        r'[^\n]{0,80}'
+        r')',
         extracted_text,
         re.IGNORECASE
     )
@@ -290,15 +347,35 @@ def build_compliance_report(extracted_text):
         marketed_by_match.group(1) if marketed_by_match else None
     )
 
-    address = address_match.group(1).strip() if address_match else None
+    address = address_match.group(0).strip() if address_match else None
+
+    invalid_address_keywords = [
+        "INGREDIENT",
+        "FLAVOUR",
+        "FLAVOR",
+        "NUTRITION",
+        "EMAIL",
+        "@",
+        "LIC.",
+        "LIC NO",
+        "FSSAI",
+        "1800",
+        "CUSTOMER CARE",
+        "WECARE",
+        "PROTEIN",
+        "CARBOHYDRATE",
+        "SUGAR",
+        "ENERGY"
+]
+
+    if address and any(
+        keyword in address.upper()
+        for keyword in invalid_address_keywords
+):
+        address = None
     net_quantity = net_quantity_match.group(1).strip() if net_quantity_match else None
 
-    if not net_quantity and re.search(r'MAGGI|MASALA|MAGIC', extracted_text, re.IGNORECASE):
-        net_quantity = "6 g"
 
-    mrp = mrp_match.group(1).strip() if mrp_match else None
-    mfg_date = mfg_date_match.group(1).strip() if mfg_date_match else None
-    use_by_date = use_by_match.group(1).strip() if use_by_match else None
     email = email_match.group(0) if email_match else None
     customer_care = phone_match.group(0) if phone_match else None
     storage_instruction = storage_match.group(0).strip() if storage_match else None
